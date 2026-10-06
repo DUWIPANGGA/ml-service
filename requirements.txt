@@ -1,0 +1,21 @@
+# ML Service — Deteksi Penyakit Ikan (ViT)
+# Python 3.11+ (diuji pada 3.14)
+
+# Web framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+
+# Model (Hugging Face ViT)
+torch>=2.4.0
+transformers>=4.45.0
+safetensors>=0.4.5
+pillow>=10.4.0
+numpy>=1.26.0
+
+# GradCAM (opsional — FR-10.8; service tetap jalan bila tidak terpasang)
+grad-cam>=1.5.5
+
+# Testing
+pytest>=8.0.0
+httpx>=0.27.0

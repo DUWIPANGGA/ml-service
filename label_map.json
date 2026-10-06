@@ -1,0 +1,16 @@
+{
+  "model_version": "vit-v1.0.0",
+  "labels": [
+    { "label": "bacterial_red_disease", "model_label": "Fish_Bacterial Red disease", "name": "Penyakit Bakteri Red Disease", "slug": "bacterial-red-disease", "severity": "berat", "disease_id": null },
+    { "label": "aeromoniasis", "model_label": "Fish_Bacterial diseases - Aeromoniasis", "name": "Infeksi Bakteri Aeromonas (Aeromoniasis)", "slug": "aeromoniasis", "severity": "berat", "disease_id": null },
+    { "label": "bacterial_gill_disease", "model_label": "Fish_Bacterial gill disease", "name": "Penyakit Bakteri Insang", "slug": "bacterial-gill-disease", "severity": "sedang", "disease_id": null },
+    { "label": "saprolegniasis", "model_label": "Fish_Fungal diseases Saprolegniasis", "name": "Saprolegniasis (Jamur Air)", "slug": "saprolegniasis", "severity": "sedang", "disease_id": null },
+    { "label": "healthy", "model_label": "Fish_Healthy Fish", "name": "Ikan Sehat", "slug": "ikan-sehat", "severity": "ringan", "disease_id": null },
+    { "label": "parasitic_disease", "model_label": "Fish_Parasitic diseases", "name": "Penyakit Parasit", "slug": "penyakit-parasit", "severity": "sedang", "disease_id": null },
+    { "label": "white_tail_disease", "model_label": "Fish_Viral diseases White tail disease", "name": "Penyakit Virus White Tail", "slug": "white-tail-disease", "severity": "berat", "disease_id": null },
+    { "label": "shrimp_black_gill", "model_label": "Shrimp_Black_Gill", "name": "Udang Black Gill", "slug": "shrimp-black-gill", "severity": "sedang", "disease_id": null },
+    { "label": "shrimp_healthy", "model_label": "Shrimp_Healthy", "name": "Udang Sehat", "slug": "udang-sehat", "severity": "ringan", "disease_id": null },
+    { "label": "shrimp_white_spot", "model_label": "Shrimp_White_Spot_Syndrome_Virus", "name": "Udang White Spot (WSSV)", "slug": "shrimp-white-spot-wssv", "severity": "berat", "disease_id": null },
+    { "label": "shrimp_wssv_black_gill", "model_label": "Shrimp_White_Spot_Syndrome_Virus_and_Black_Gill", "name": "Udang White Spot + Black Gill", "slug": "shrimp-wssv-black-gill", "severity": "kritis", "disease_id": null }
+  ]
+}
