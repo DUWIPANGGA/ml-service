@@ -1,0 +1,56 @@
+# Ngingu ML Service — systemd unit (bare-metal / VPS)
+#
+#   Instal:
+#     sudo cp deploy/ml-service.service /etc/systemd/system/
+#     sudo systemctl daemon-reload
+#     sudo systemctl enable --now ml-service
+#     systemctl status ml-service
+#     journalctl -u ml-service -f
+#
+# Asumsi: checkout ada di /opt/ngingu/ml-service dengan .env di dalamnya.
+# Sesuaikan User/WorkingDirectory bila lokasi Anda berbeda.
+
+[Unit]
+Description=Ngingu ML Service (FastAPI - deteksi penyakit ikan, ViT 11 kelas)
+Documentation=https://github.com/DUWIPANGGA/ml-service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ngingu
+Group=ngingu
+WorkingDirectory=/opt/ngingu/ml-service
+
+# Opsional — bila tidak ada file, semua nilai jatuh ke default di app/config.py.
+EnvironmentFile=-/opt/ngingu/ml-service/.env
+
+# Service mengikat 127.0.0.1 (default) → hanya nginx di mesin sama yang boleh
+# menembaknya. Host/port ada di .env.
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/opt/ngingu/ml-service/.venv/bin/python serve.py
+
+# Model butuh ±100 detik untuk siap; systemd tidak boleh menganggap gagal
+# lebih dulu. /health menjawab sejak detik pertama (liveness), /health?ready=1
+# baru 503 sampai model siap (readiness).
+TimeoutStartSec=300
+Restart=on-failure
+RestartSec=5
+
+# torch + model 327 MB butuh RAM longgar. Ubah sesuai mesin.
+MemoryMax=4G
+LimitNOFILE=65535
+
+# Hardening — service hanya perlu membaca.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

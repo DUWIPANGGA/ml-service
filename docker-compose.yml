@@ -1,0 +1,42 @@
+# Ngingu ML Service — stack lokal / server.
+#
+#   docker compose up -d --build
+#   docker compose logs -f ml-service
+#   curl http://127.0.0.1:8009/health
+#
+# Backend Laravel (run_dev.ps1 / php artisan serve) juga memakai port 8000,
+# makanya service ini dipindah ke 8009.
+
+services:
+  ml-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ngingu/ml-service:latest
+    container_name: ngingu-ml
+    # Hanya loopback — service ini tidak punya autentikasi.
+    # Butuh diakses container lain di jaringan compose? Ganti menjadi "8009:8009"
+    # dan arahkan ML_BASE_URL ke http://ml-service:8009.
+    ports:
+      - "127.0.0.1:8009:8009"
+    environment:
+      MODEL_VERSION: vit-v1.0.0
+      DEVICE: cpu
+      GRADCAM_ENABLED: "true"
+      PREDICT_TIMEOUT_SECONDS: "30"
+      LOG_LEVEL: INFO
+    # Bobot model di-mount dari host bila ingin update checkpoint tanpa
+    # rebuild image (COPY models/ di Dockerfile bisa dikomentari).
+    # volumes:
+    #   - ./models:/srv/ml-service/models:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8009/health?ready=1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
+    deploy:
+      resources:
+        limits:
+          memory: 4g

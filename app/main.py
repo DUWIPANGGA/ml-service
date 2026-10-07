@@ -13,6 +13,7 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import os
+import threading
 import time
 from contextlib import asynccontextmanager
 
@@ -34,7 +35,7 @@ from .preprocess import (
     validate_upload,
 )
 
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logging.basicConfig(level=config.LOG_LEVEL, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("ml.main")
 
 START_TIME = time.time()
@@ -51,17 +52,32 @@ def _get_executor() -> concurrent.futures.ThreadPoolExecutor:
     return _executor
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    """Muat model saat startup; gagal -> service tetap jalan (503, degraded mode NFR-03.2)."""
-    _get_executor()
+def _load_model_background() -> None:
+    """Muat checkpoint di thread terpisah — lihat catatan di lifespan()."""
     try:
         classifier.load()
         logger.info("Startup OK — model %s siap", config.MODEL_VERSION)
     except Exception as exc:  # noqa: BLE001
         classifier.error = str(exc)
+        classifier.state = "failed"
         logger.exception("Model GAGAL dimuat: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Muat model di BACKGROUND; gagal -> service tetap jalan (503, NFR-03.2).
+
+    Sengaja tidak dipanggil sinkron: memuat checkpoint 327 MB butuh 40-60 detik,
+    dan bila dilakukan di dalam lifespan, /health ikut macet selama itu — health
+    check Docker/Kubernetes menganggap container mati lalu me-restart berulang.
+    """
+    _get_executor()
+    loader = threading.Thread(target=_load_model_background, name="model-loader", daemon=True)
+    loader.start()
     yield
+    # Biasanya sudah selesai sejak lama; timeout hanya agar shutdown tidak
+    # tersangkut bila load masih berjalan saat SIGTERM datang.
+    loader.join(timeout=10)
     global _executor
     if _executor is not None:
         _executor.shutdown(wait=False, cancel_futures=True)
@@ -80,9 +96,13 @@ app = FastAPI(
 
 def _ensure_loaded() -> None:
     if not classifier.is_loaded:
+        if classifier.is_loading:
+            message = "Model masih dimuat, coba lagi dalam beberapa detik."
+        else:
+            message = classifier.error or "Model belum dimuat"
         raise HTTPException(
             status_code=503,
-            detail={"code": "MODEL_NOT_LOADED", "message": classifier.error or "Model belum dimuat"},
+            detail={"code": "MODEL_NOT_LOADED", "message": message},
         )
 
 
@@ -111,9 +131,21 @@ def _read_upload(file: UploadFile) -> Image.Image:
         ensure_quality(image)
         return image
     except UnsupportedMediaTypeError as exc:
-        raise HTTPException(status_code=400, detail="UNSUPPORTED_MEDIA_TYPE") from exc
+        # Bentuk terstruktur seperti 422/503/504 — backend membaca `detail.code`
+        # dan menerjemahkannya ke MlException::UNSUPPORTED_MEDIA_TYPE
+        # (MlPredictionNormalizer::exception). String polos membuat kode hilang.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "UNSUPPORTED_MEDIA_TYPE",
+                "message": str(exc) or "File harus berupa gambar JPG/PNG/WEBP",
+            },
+        ) from exc
     except ImageTooLargeError as exc:
-        raise HTTPException(status_code=413, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "PAYLOAD_TOO_LARGE", "message": str(exc)},
+        ) from exc
     except ImageQualityError as exc:
         raise HTTPException(
             status_code=422,
@@ -186,14 +218,35 @@ def _aggregate(results: list[dict], all_probs: list[np.ndarray]) -> dict:
 # ──────────────────────────────────────────────────────────────────── endpoints
 
 @app.get("/health", tags=["ops"])
-def health() -> dict:
-    """FR-10.2 — health check."""
-    return {
-        "status": "healthy" if classifier.is_loaded else "degraded",
+def health(ready: bool = False) -> dict:
+    """FR-10.2 — health check. Selalu 200 supaya liveness tidak membunuh container
+    yang sedang memuat model.
+
+    `GET /health?ready=1` -> 200 hanya bila model sudah siap, selain itu 503.
+    Pakai ini sebagai readiness probe Docker/Kubernetes.
+    """
+    if classifier.is_loaded:
+        status = "healthy"
+    elif classifier.is_loading:
+        status = "starting"
+    else:
+        status = "degraded"
+
+    body = {
+        "status": status,
         "model_version": config.MODEL_VERSION,
         "model_format": classifier.model_format,
         "uptime_seconds": int(time.time() - START_TIME),
+        "model_loaded": classifier.is_loaded,
     }
+
+    if ready and not classifier.is_loaded:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "MODEL_NOT_LOADED", "state": classifier.state, "message": classifier.error or body["status"]},
+        )
+
+    return body
 
 
 @app.get("/model/info", tags=["ops"])

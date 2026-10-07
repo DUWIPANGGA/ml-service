@@ -1,0 +1,25 @@
+# Build context harus tipis & deterministik.
+.venv
+venv
+env
+.git
+.gitignore
+
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+
+# Bukan bagian dari image produksi
+tests
+scripts
+conftest.py
+.env
+.env.example
+README.md
+Dockerfile
+docker-compose.yml
+deploy
+
+# models/ TIDAK di-ignore — bobot 327 MB memang harus ikut ter-COPY
+# (lihat catatan di Dockerfile bila ingin memindahkannya ke volume).

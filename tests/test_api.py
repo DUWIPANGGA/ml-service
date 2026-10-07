@@ -100,6 +100,54 @@ def test_health_with_model(client):
     body = client.get("/health").json()
     assert body["status"] == "healthy"
     assert body["model_format"] == "safetensors"
+    assert body["model_loaded"] is True
+
+
+def test_health_reports_starting_while_model_loads(monkeypatch):
+    """Model dimuat 40-60 dtk di background — /health wajib tetap menjawab."""
+    monkeypatch.setattr(classifier, "load", lambda: None, raising=False)
+    monkeypatch.setattr(classifier, "model", None, raising=False)
+    monkeypatch.setattr(classifier, "state", "loading", raising=False)
+    monkeypatch.setattr(classifier, "error", None, raising=False)
+
+    with TestClient(app) as c:
+        res = c.get("/health")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "starting"
+    assert body["model_loaded"] is False
+
+
+def test_health_ready_flag_is_the_readiness_probe(monkeypatch):
+    """?ready=1 -> 503 selama model belum siap, 200 sesudahnya."""
+    monkeypatch.setattr(classifier, "load", lambda: None, raising=False)
+    monkeypatch.setattr(classifier, "model", None, raising=False)
+    monkeypatch.setattr(classifier, "state", "loading", raising=False)
+    monkeypatch.setattr(classifier, "error", None, raising=False)
+
+    with TestClient(app) as c:
+        assert c.get("/health?ready=1").status_code == 503
+        assert c.get("/health").status_code == 200  # liveness tetap lolos
+
+
+def test_health_ready_ok_when_model_loaded(client):
+    assert client.get("/health?ready=1").status_code == 200
+
+
+def test_predict_explains_model_is_still_loading(monkeypatch):
+    monkeypatch.setattr(classifier, "load", lambda: None, raising=False)
+    monkeypatch.setattr(classifier, "model", None, raising=False)
+    monkeypatch.setattr(classifier, "state", "loading", raising=False)
+    monkeypatch.setattr(classifier, "error", None, raising=False)
+
+    with TestClient(app) as c:
+        res = c.post("/predict", files={"image": ("ikan.jpg", _noisy_jpeg_bytes(), "image/jpeg")})
+
+    assert res.status_code == 503
+    detail = res.json()["detail"]
+    assert detail["code"] == "MODEL_NOT_LOADED"
+    assert "masih dimuat" in detail["message"]
 
 
 # ──────────────────────────────────────────────────────────────── /model/info
@@ -194,7 +242,10 @@ def test_predict_unsupported_media_type(client):
         files={"image": ("catatan.txt", b"bukan gambar", "text/plain")},
     )
     assert res.status_code == 400
-    assert res.json()["detail"] == "UNSUPPORTED_MEDIA_TYPE"
+    detail = res.json()["detail"]
+    # Bentuk terstruktur agar backend bisa memetakan `code` (API.md §10.1).
+    assert detail["code"] == "UNSUPPORTED_MEDIA_TYPE"
+    assert detail["message"]
 
 
 def test_predict_corrupt_image(client):
@@ -203,7 +254,9 @@ def test_predict_corrupt_image(client):
         files={"image": ("rusak.jpg", b"isi tidak valid", "image/jpeg")},
     )
     assert res.status_code == 400
-    assert res.json()["detail"] == "UNSUPPORTED_MEDIA_TYPE"
+    detail = res.json()["detail"]
+    assert detail["code"] == "UNSUPPORTED_MEDIA_TYPE"
+    assert detail["message"]
 
 
 def test_predict_dark_image_quality_low(client):

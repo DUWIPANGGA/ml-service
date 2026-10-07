@@ -38,15 +38,26 @@ class DiseaseClassifier:
         self.model_format: str = "unknown"
         self.loaded_at: str | None = None
         self.error: str | None = None
+        # idle -> loading -> ready | failed — dipakai /health selagi model dimuat
+        # di background (40-60 detik), supaya health check tidak ikut macet.
+        self.state: str = "idle"
         self._lock = threading.Lock()
 
     @property
     def is_loaded(self) -> bool:
         return self.model is not None
 
+    @property
+    def is_loading(self) -> bool:
+        return self.state == "loading"
+
     # ------------------------------------------------------------- muat model
     def load(self) -> None:
         """Muat model + processor. Melempar RuntimeError bila gagal."""
+        # SEBELUM import torch/transformers — import itu bagian terberat (±90 dtk),
+        # dan selama itu /health harus sudah melapor "starting", bukan "degraded".
+        self.state = "loading"
+
         import torch
         from transformers import ViTForImageClassification, ViTImageProcessor
 
@@ -60,6 +71,11 @@ class DiseaseClassifier:
 
         self.device = self._resolve_device(torch)
         logger.info("Memuat ViT dari %s (kelas=%d, device=%s)", path, n_classes, self.device)
+
+        # Dipanggil lebih dulu ke variabel lokal: `self.model` baru di-assign di
+        # akhir, supaya `is_loaded` tidak pernah True untuk model setengah jadi
+        # (load berjalan di background thread — bisa saat request masuk).
+        model: ViTForImageClassification
 
         if path.is_dir() and (path / "config.json").exists():
             # Bentuk 1: folder save_pretrained hasil fine-tuning.
@@ -76,7 +92,7 @@ class DiseaseClassifier:
             }
             self._verify_label_order(self.labels, original_id2label)
 
-            self.model = ViTForImageClassification.from_pretrained(
+            model = ViTForImageClassification.from_pretrained(
                 str(path),
                 num_labels=n_classes,
                 id2label=id2label,
@@ -86,31 +102,35 @@ class DiseaseClassifier:
             self.processor = ViTImageProcessor.from_pretrained(str(path))
         elif path.is_file():
             # Bentuk 2: file state_dict tunggal di atas arsitektur base.
+            # PERLU INTERNET — arsitektur diambil dari Hugging Face (HF_OFFLINE=true menolak ini).
             self.model_format = path.suffix.lstrip(".").replace("bin", "pytorch")
-            self.model = ViTForImageClassification.from_pretrained(
+            model = ViTForImageClassification.from_pretrained(
                 config.BASE_MODEL_ID,
                 num_labels=n_classes,
                 id2label=id2label,
                 label2id=label2id,
                 ignore_mismatched_sizes=True,
             )
-            self._load_state_dict(path)
+            self._load_state_dict(model, path)
             self.processor = ViTImageProcessor.from_pretrained(config.BASE_MODEL_ID)
         else:
             raise FileNotFoundError(
                 f"MODEL_PATH tidak ditemukan: {path}. "
-                "Letakkan checkpoint fine-tuned di ml-service/models/vit-fish-11/ "
-                "(folder save_pretrained atau file .safetensors/.pt)."
+                "Letakkan checkpoint fine-tuned di ml-service/models/ "
+                "(folder save_pretrained config.json + model.safetensors, atau 1 file .safetensors/.pt)."
             )
 
-        self.model.to(self.device)
-        self.model.eval()
+        model.to(self.device)
+        model.eval()
 
         from datetime import datetime, timezone
 
         self.loaded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         self.error = None
-        n_params = sum(p.numel() for p in self.model.parameters())
+        n_params = sum(p.numel() for p in model.parameters())
+        # Assign paling akhir — sejak baris ini `is_loaded` baru True.
+        self.model = model
+        self.state = "ready"
         logger.info("Model siap: %s parameter, format=%s", f"{n_params:,}", self.model_format)
 
     def _load_labels(self) -> list[Label]:
@@ -138,7 +158,7 @@ class DiseaseClassifier:
                 "prediksi akan salah mapping. Selaraskan urutannya:\n" + "\n".join(mismatches)
             )
 
-    def _load_state_dict(self, path: Path) -> None:
+    def _load_state_dict(self, model: "object", path: Path) -> None:
         import torch
 
         if path.suffix == ".safetensors":
@@ -152,7 +172,7 @@ class DiseaseClassifier:
         if isinstance(state, dict) and "state_dict" in state and isinstance(state["state_dict"], dict):
             state = state["state_dict"]
 
-        missing, unexpected = self.model.load_state_dict(state, strict=False)
+        missing, unexpected = model.load_state_dict(state, strict=False)
         if missing:
             logger.warning("Missing keys (%d): %s...", len(missing), missing[:5])
         if unexpected:

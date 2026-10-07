@@ -28,6 +28,26 @@ MODEL_PATH = Path(os.getenv("MODEL_PATH", str(BASE_DIR / "models")))
 # "auto" | "cpu" | "cuda" | "cuda:0" | "mps"
 DEVICE = os.getenv("DEVICE", "auto")
 
+# ── Server (dipakai serve.py) ────────────────────────────────────────────────
+# Default 127.0.0.1 karena service ini TIDAK punya autentikasi — jangan dibuka
+# ke publik tanpa reverse proxy. Docker/systemd menimpanya lewat env.
+# Port 8009: 8000 sudah dipakai backend Laravel (run_dev.ps1).
+HOST = os.getenv("HOST", "127.0.0.1")
+PORT = int(os.getenv("PORT", "8009"))
+# 1 = disarankan: tiap worker memuat salinan model 327 MB sendiri ke RAM.
+WORKERS = int(os.getenv("WORKERS", "1"))
+# Batas antar-request; kosongkan bila di belakang reverse proxy.
+_raw_limit = os.getenv("LIMIT_CONCURRENCY", "").strip()
+LIMIT_CONCURRENCY = int(_raw_limit) if _raw_limit.isdigit() else None
+
+# Muat checkpoint butuh jaringan Hugging Face HANYA untuk MODEL_PATH berupa 1 file
+# state_dict (arsitektur diambil dari hub). Set true untuk deploy air-gapped
+# dengan bentuk folder save_pretrained.
+HF_OFFLINE = os.getenv("HF_OFFLINE", "false").lower() in {"1", "true", "yes"}
+if HF_OFFLINE:
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 MODEL_VERSION = os.getenv("MODEL_VERSION", "vit-v1.0.0")
 
 LABEL_MAP_PATH = Path(os.getenv("LABEL_MAP_PATH", str(BASE_DIR / "label_map.json")))
@@ -55,3 +75,9 @@ ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 # GradCAM (FR-10.8) — diaktifkan per-request via ?gradcam=true.
 GRADCAM_ENABLED = os.getenv("GRADCAM_ENABLED", "true").lower() in {"1", "true", "yes"}
+
+# Timeout keep-alive koneksi idle (detik).
+TIMEOUT_KEEP_ALIVE = int(os.getenv("TIMEOUT_KEEP_ALIVE", "30"))
+
+# Level log (dipakai serve.py & app.main).
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
